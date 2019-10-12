@@ -1,4 +1,3 @@
-
 // A cross-browser requestAnimationFrame
 // See https://hacks.mozilla.org/2011/08/animating-with-javascript-from-setinterval-to-requestanimationframe/
 var requestAnimFrame = (function(){
@@ -32,6 +31,12 @@ function main() {
     requestAnimFrame(main);
 };
 
+function getRandomInt(min, max) {
+    min = Math.ceil(min);
+    max = Math.floor(max);
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 function init() {
     terrainPattern = ctx.createPattern(resources.get('img/terrain.png'), 'repeat');
 
@@ -45,7 +50,7 @@ function init() {
 }
 
 resources.load([
-    'img/sprites.png',
+    'img/sprites_02.png',
     'img/terrain.png'
 ]);
 resources.onReady(init);
@@ -53,12 +58,13 @@ resources.onReady(init);
 // Game state
 var player = {
     pos: [0, 0],
-    sprite: new Sprite('img/sprites.png', [0, 0], [39, 39], 16, [0, 1])
+    sprite: new Sprite('img/sprites_02.png', [0, 0], [39, 39], 16, [0, 1])
 };
 
 var bullets = [];
 var enemies = [];
 var explosions = [];
+var megalits = [];
 
 var lastFire = Date.now();
 var gameTime = 0;
@@ -86,8 +92,9 @@ function update(dt) {
         enemies.push({
             pos: [canvas.width,
                   Math.random() * (canvas.height - 39)],
-            sprite: new Sprite('img/sprites.png', [0, 78], [80, 39],
-                               6, [0, 1, 2, 3, 2, 1])
+            sprite: new Sprite('img/sprites_02.png', [0, 78], [80, 39],
+                               6, [0, 1, 2, 3, 2, 1]),
+            seed: getRandomInt(0, 1) == 0 ? 1 : -1
         });
     }
 
@@ -121,16 +128,23 @@ function handleInput(dt) {
 
         bullets.push({ pos: [x, y],
                        dir: 'forward',
-                       sprite: new Sprite('img/sprites.png', [0, 39], [18, 8]) });
+                       sprite: new Sprite('img/sprites_02.png', [0, 39], [18, 8]) });
         bullets.push({ pos: [x, y],
                        dir: 'up',
-                       sprite: new Sprite('img/sprites.png', [0, 50], [9, 5]) });
+                       sprite: new Sprite('img/sprites_02.png', [0, 50], [9, 5]) });
         bullets.push({ pos: [x, y],
                        dir: 'down',
-                       sprite: new Sprite('img/sprites.png', [0, 60], [9, 5]) });
+                       sprite: new Sprite('img/sprites_02.png', [0, 60], [9, 5]) });
 
         lastFire = Date.now();
     }
+}
+
+function tcas(pos, size, pos2, size2)
+{
+    var safe = 30;
+    return !(pos[1] + size[1] <= pos2[1] || pos[1] > pos2[1] + size2[1] ||
+        pos[0] + size[0] + safe<= pos2[0] || pos[0] > pos2[0] + size2[0] + safe);
 }
 
 function updateEntities(dt) {
@@ -160,6 +174,13 @@ function updateEntities(dt) {
     for(var i=0; i<enemies.length; i++) {
         enemies[i].pos[0] -= enemySpeed * dt;
         enemies[i].sprite.update(dt);
+
+
+        for (var k = 0; k < megalits.length; k++) {
+            if (tcas(enemies[i].pos, enemies[i].sprite.size, megalits[k].pos, megalits[k].sprite.size)) {
+                enemies[i].pos[1] += (enemySpeed * dt * enemies[i].seed);
+            }
+        }
 
         // Remove if offscreen
         if(enemies[i].pos[0] + enemies[i].sprite.size[0] < 0) {
@@ -194,13 +215,33 @@ function boxCollides(pos, size, pos2, size2) {
                     pos2[0] + size2[0], pos2[1] + size2[1]);
 }
 
+function makeExplosions(pos) {
+    explosions.push({
+        pos: pos,
+        sprite: new Sprite('img/sprites_02.png',
+                           [0, 117],
+                           [39, 39],
+                           16,
+                           [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+                           null,
+                           true)
+    });
+}
+
 function checkCollisions() {
     checkPlayerBounds();
     
     // Run collision detection for all enemies and bullets
+    for (var k = 0; k < megalits.length; k++) {
+        if (boxCollides(player.pos, player.sprite.size, megalits[k].pos, megalits[k].sprite.size)) {
+            gameOver();
+        }
+    }
+
     for(var i=0; i<enemies.length; i++) {
         var pos = enemies[i].pos;
         var size = enemies[i].sprite.size;
+        var loopEnd = false;
 
         for(var j=0; j<bullets.length; j++) {
             var pos2 = bullets[j].pos;
@@ -215,27 +256,53 @@ function checkCollisions() {
                 score += 100;
 
                 // Add an explosion
-                explosions.push({
-                    pos: pos,
-                    sprite: new Sprite('img/sprites.png',
-                                       [0, 117],
-                                       [39, 39],
-                                       16,
-                                       [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-                                       null,
-                                       true)
-                });
+                makeExplosions(pos);
 
                 // Remove the bullet and stop this iteration
                 bullets.splice(j, 1);
                 break;
             }
         }
+ 
 
         if(boxCollides(pos, size, player.pos, player.sprite.size)) {
             gameOver();
         }
+
+        if (loopEnd)
+            break;
+
+        for(var k=0; k<megalits.length; k++) {
+            var pos2 = megalits[k].pos;
+            var size2 = megalits[k].sprite.size;
+
+            if(boxCollides(pos, size, pos2, size2)) {
+                // Remove the enemy
+                enemies.splice(i, 1);
+                i--;
+                // Add an explosion
+                makeExplosions(pos);
+                break;
+            }
+            
+        }
     }
+
+    for(var k=0; k<megalits.length; k++) {
+        var pos = megalits[k].pos;
+        var size = megalits[k].sprite.size;
+
+        for(var j=0; j<bullets.length; j++) {
+            var pos2 = bullets[j].pos;
+            var size2 = bullets[j].sprite.size;
+
+            if(boxCollides(pos, size, pos2, size2)) {
+                bullets.splice(j, 1);
+                break;
+            }
+        }
+    }
+
 }
 
 function checkPlayerBounds() {
@@ -268,6 +335,7 @@ function render() {
     renderEntities(bullets);
     renderEntities(enemies);
     renderEntities(explosions);
+    renderEntities(megalits);
 };
 
 function renderEntities(list) {
@@ -290,6 +358,21 @@ function gameOver() {
     isGameOver = true;
 }
 
+function generateMegalits()
+{
+    var megalithsCount = getRandomInt(4, 8);
+    var sprites = [[4, 212], [4, 273]];
+
+    for (var i = 0; i < megalithsCount; i++) {
+        var pos_x = getRandomInt(80, canvas.width - 56);
+        var pos_y = getRandomInt(0, canvas.height - 100)
+        megalits.push({
+            pos: [pos_x, pos_y],
+            sprite: new Sprite('img/sprites_02.png', sprites[getRandomInt(0, 1)], [56, 55])
+        });
+    }
+}
+
 // Reset game to original state
 function reset() {
     document.getElementById('game-over').style.display = 'none';
@@ -300,6 +383,9 @@ function reset() {
 
     enemies = [];
     bullets = [];
+    megalits = [];
+
+    generateMegalits();
 
     player.pos = [50, canvas.height / 2];
 };
